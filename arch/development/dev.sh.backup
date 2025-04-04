@@ -1,0 +1,965 @@
+#!/bin/bash
+
+# Set colors for better output readability
+GREEN="\033[32m"
+YELLOW="\033[33m"
+RED="\033[31m"
+BLUE="\033[34m"
+CYAN="\033[36m"
+MAGENTA="\033[35m"
+RESET="\033[0m"
+BOLD="\033[1m"
+
+# Define arrays for selections
+declare -A selections
+
+# Script version
+VERSION="1.0.0"
+
+# Function to display header
+display_header() {
+    clear
+    echo -e "${CYAN}"
+    if command -v figlet &> /dev/null; then
+        figlet "Arch Dev Setup"
+    else
+        echo -e "${BOLD}╔═══════════════════════════════════╗"
+        echo -e "║       ARCH DEVELOPER SETUP       ║"
+        echo -e "╚═══════════════════════════════════╝${RESET}"
+    fi
+    echo -e "${YELLOW}Version: ${VERSION}${RESET}"
+    echo -e "${BLUE}This script will help you set up a complete development environment on Arch Linux.${RESET}"
+    echo
+}
+
+# Function to install a package with pacman
+install_with_pacman() {
+    echo -e "${YELLOW}Installing ${BOLD}$1${RESET} with pacman..."
+    sudo pacman -S --noconfirm --needed $1
+    return $?
+}
+
+# Function to install a package with yay (AUR)
+install_with_yay() {
+    # First check if yay is installed
+    if ! command -v yay &> /dev/null; then
+        echo -e "${YELLOW}Yay is not installed. Installing yay first...${RESET}"
+        # Install git if not already installed (needed for yay)
+        if ! command -v git &> /dev/null; then
+            install_with_pacman "git"
+        fi
+        
+        # Create temp directory for yay installation
+        temp_dir=$(mktemp -d)
+        cd "$temp_dir"
+        
+        # Clone and build yay
+        git clone https://aur.archlinux.org/yay.git
+        cd yay
+        makepkg -si --noconfirm
+        
+        # Clean up
+        cd ~
+        rm -rf "$temp_dir"
+    fi
+    
+    echo -e "${YELLOW}Installing ${BOLD}$1${RESET} with yay..."
+    yay -S --noconfirm $1
+    return $?
+}
+
+# Function to check and install a package
+check_and_install() {
+    local pkg_name=$1
+    local install_name=$2
+    local install_method=$3
+    
+    if ! command -v $pkg_name &> /dev/null; then
+        if [[ "$install_method" == "aur" ]]; then
+            install_with_yay "$install_name"
+        else
+            install_with_pacman "$install_name"
+        fi
+        
+        if [ $? -eq 0 ]; then
+            echo -e "${GREEN}✓ Successfully installed ${BOLD}$pkg_name${RESET}"
+        else
+            echo -e "${RED}✗ Failed to install ${BOLD}$pkg_name${RESET}"
+        fi
+    else
+        echo -e "${GREEN}✓ $pkg_name is already installed.${RESET}"
+    fi
+}
+
+# Function to install Rust using rustup
+install_rust() {
+    if ! command -v rustc &> /dev/null; then
+        echo -e "${YELLOW}Installing ${BOLD}Rust${RESET} with rustup..."
+        curl --proto '=https' --tlsv1.2 -sSf https://sh.rustup.rs | sh -s -- -y
+        source $HOME/.cargo/env
+        echo -e "${GREEN}✓ Successfully installed Rust${RESET}"
+    else
+        echo -e "${GREEN}✓ Rust is already installed.${RESET}"
+    fi
+}
+
+# Function to enable and start a systemd service
+enable_service() {
+    echo -e "${YELLOW}Enabling and starting ${BOLD}$1${RESET} service..."
+    sudo systemctl enable --now $1
+    if [ $? -eq 0 ]; then
+        echo -e "${GREEN}✓ Successfully enabled $1 service${RESET}"
+    else
+        echo -e "${RED}✗ Failed to enable $1 service${RESET}"
+    fi
+}
+
+# Function to add current user to a group
+add_user_to_group() {
+    echo -e "${YELLOW}Adding user to ${BOLD}$1${RESET} group..."
+    sudo usermod -aG $1 $USER
+    if [ $? -eq 0 ]; then
+        echo -e "${GREEN}✓ Successfully added user to $1 group${RESET}"
+        echo -e "${YELLOW}Note: You may need to log out and back in for group changes to take effect${RESET}"
+    else
+        echo -e "${RED}✗ Failed to add user to $1 group${RESET}"
+    fi
+}
+
+# Function to toggle selection
+toggle_selection() {
+    if [[ ${selections[$1]} == true ]]; then
+        selections[$1]=false
+    else
+        selections[$1]=true
+    fi
+}
+
+# Function to show current selections
+show_selections() {
+    echo -e "${CYAN}Current selections:${RESET}"
+    
+    local section=""
+    
+    # Display Programming Languages
+    section="Programming Languages"
+    echo -e "${BOLD}${MAGENTA}$section:${RESET}"
+    for key in "${!selections[@]}"; do
+        if [[ $key == PL_* ]]; then
+            local name=${key#PL_}
+            if [[ ${selections[$key]} == true ]]; then
+                echo -e "  ${GREEN}[✓] $name${RESET}"
+            else
+                echo -e "  ${RED}[ ] $name${RESET}"
+            fi
+        fi
+    done
+    
+    # Display Development Tools
+    section="Development Tools"
+    echo -e "${BOLD}${MAGENTA}$section:${RESET}"
+    for key in "${!selections[@]}"; do
+        if [[ $key == DT_* ]]; then
+            local name=${key#DT_}
+            if [[ ${selections[$key]} == true ]]; then
+                echo -e "  ${GREEN}[✓] $name${RESET}"
+            else
+                echo -e "  ${RED}[ ] $name${RESET}"
+            fi
+        fi
+    done
+    
+    # Display Package Managers & Utilities
+    section="Package Managers & Utilities"
+    echo -e "${BOLD}${MAGENTA}$section:${RESET}"
+    for key in "${!selections[@]}"; do
+        if [[ $key == PU_* ]]; then
+            local name=${key#PU_}
+            if [[ ${selections[$key]} == true ]]; then
+                echo -e "  ${GREEN}[✓] $name${RESET}"
+            else
+                echo -e "  ${RED}[ ] $name${RESET}"
+            fi
+        fi
+    done
+    
+    # Display Databases
+    section="Databases"
+    echo -e "${BOLD}${MAGENTA}$section:${RESET}"
+    for key in "${!selections[@]}"; do
+        if [[ $key == DB_* ]]; then
+            local name=${key#DB_}
+            if [[ ${selections[$key]} == true ]]; then
+                echo -e "  ${GREEN}[✓] $name${RESET}"
+            else
+                echo -e "  ${RED}[ ] $name${RESET}"
+            fi
+        fi
+    done
+    
+    # Display IDEs & Code Editors
+    section="IDEs & Code Editors"
+    echo -e "${BOLD}${MAGENTA}$section:${RESET}"
+    for key in "${!selections[@]}"; do
+        if [[ $key == IDE_* ]]; then
+            local name=${key#IDE_}
+            if [[ ${selections[$key]} == true ]]; then
+                echo -e "  ${GREEN}[✓] $name${RESET}"
+            else
+                echo -e "  ${RED}[ ] $name${RESET}"
+            fi
+        fi
+    done
+    
+    # Display Other Tools
+    section="Other Tools"
+    echo -e "${BOLD}${MAGENTA}$section:${RESET}"
+    for key in "${!selections[@]}"; do
+        if [[ $key == OT_* ]]; then
+            local name=${key#OT_}
+            if [[ ${selections[$key]} == true ]]; then
+                echo -e "  ${GREEN}[✓] $name${RESET}"
+            else
+                echo -e "  ${RED}[ ] $name${RESET}"
+            fi
+        fi
+    done
+    
+    echo
+}
+
+# Initialize selections (all false by default)
+# Programming Languages
+selections[PL_Python]=false
+selections[PL_GCC]=false
+selections[PL_Clang]=false
+selections[PL_NodeJS]=false
+selections[PL_Java]=false
+selections[PL_Flutter]=false
+selections[PL_DotNet]=false
+selections[PL_Go]=false
+selections[PL_Rust]=false
+selections[PL_PHP]=false
+selections[PL_Perl]=false
+
+# Development Tools
+selections[DT_Git]=false
+selections[DT_Docker]=false
+selections[DT_DockerCompose]=false
+selections[DT_Kubectl]=false
+selections[DT_Minikube]=false
+selections[DT_AWS_CLI]=false
+selections[DT_BuildTools]=false
+
+# Package Managers & Utilities
+selections[PU_Yay]=false
+selections[PU_Snap]=false
+selections[PU_Flatpak]=false
+selections[PU_ZshUtils]=false
+selections[PU_NerdFonts]=false
+
+# Databases
+selections[DB_MariaDB]=false
+selections[DB_PostgreSQL]=false
+selections[DB_Redis]=false
+selections[DB_MongoDB]=false
+
+# IDEs & Code Editors
+selections[IDE_VSCode]=false
+selections[IDE_JetBrains]=false
+
+# Other Tools
+selections[OT_Postman]=false
+selections[OT_Insomnia]=false
+selections[OT_Htop]=false
+selections[OT_Btop]=false
+selections[OT_ModernUtils]=false
+
+# Function to show programming languages menu
+show_languages_menu() {
+    local menu_active=true
+
+    while $menu_active; do
+        display_header
+        echo -e "${CYAN}${BOLD}Programming Languages Selection${RESET}"
+        echo
+        echo -e "${BLUE}Toggle options by entering the corresponding number:${RESET}"
+        echo -e "${GREEN}1. ${selections[PL_Python] && "✓" || " "} Python & pip${RESET}"
+        echo -e "${GREEN}2. ${selections[PL_GCC] && "✓" || " "} GCC & G++ (C/C++)${RESET}"
+        echo -e "${GREEN}3. ${selections[PL_Clang] && "✓" || " "} Clang (C/C++)${RESET}"
+        echo -e "${GREEN}4. ${selections[PL_NodeJS] && "✓" || " "} Node.js & NPM${RESET}"
+        echo -e "${GREEN}5. ${selections[PL_Java] && "✓" || " "} Java (JDK)${RESET}"
+        echo -e "${GREEN}6. ${selections[PL_Flutter] && "✓" || " "} Flutter & Dart${RESET}"
+        echo -e "${GREEN}7. ${selections[PL_DotNet] && "✓" || " "} .NET SDK${RESET}"
+        echo -e "${GREEN}8. ${selections[PL_Go] && "✓" || " "} Go (Golang)${RESET}"
+        echo -e "${GREEN}9. ${selections[PL_Rust] && "✓" || " "} Rust${RESET}"
+        echo -e "${GREEN}10. ${selections[PL_PHP] && "✓" || " "} PHP${RESET}"
+        echo -e "${GREEN}11. ${selections[PL_Perl] && "✓" || " "} Perl${RESET}"
+        echo
+        echo -e "${YELLOW}12. Toggle All${RESET}"
+        echo -e "${RED}13. Back to Main Menu${RESET}"
+        echo
+        read -p "Your choice: " choice
+
+        case $choice in
+            1) toggle_selection "PL_Python" ;;
+            2) toggle_selection "PL_GCC" ;;
+            3) toggle_selection "PL_Clang" ;;
+            4) toggle_selection "PL_NodeJS" ;;
+            5) toggle_selection "PL_Java" ;;
+            6) toggle_selection "PL_Flutter" ;;
+            7) toggle_selection "PL_DotNet" ;;
+            8) toggle_selection "PL_Go" ;;
+            9) toggle_selection "PL_Rust" ;;
+            10) toggle_selection "PL_PHP" ;;
+            11) toggle_selection "PL_Perl" ;;
+            12) 
+                # Toggle all
+                local all_selected=true
+                for key in "${!selections[@]}"; do
+                    if [[ $key == PL_* && ${selections[$key]} == false ]]; then
+                        all_selected=false
+                        break
+                    fi
+                done
+                
+                for key in "${!selections[@]}"; do
+                    if [[ $key == PL_* ]]; then
+                        selections[$key]=$([ "$all_selected" == true ] && echo false || echo true)
+                    fi
+                done
+                ;;
+            13) menu_active=false ;;
+            *) echo -e "${RED}Invalid choice! Please try again.${RESET}"; sleep 1 ;;
+        esac
+    done
+}
+
+# Function to show development tools menu
+show_devtools_menu() {
+    local menu_active=true
+
+    while $menu_active; do
+        display_header
+        echo -e "${CYAN}${BOLD}Development Tools Selection${RESET}"
+        echo
+        echo -e "${BLUE}Toggle options by entering the corresponding number:${RESET}"
+        echo -e "${GREEN}1. ${selections[DT_Git] && "✓" || " "} Git${RESET}"
+        echo -e "${GREEN}2. ${selections[DT_Docker] && "✓" || " "} Docker${RESET}"
+        echo -e "${GREEN}3. ${selections[DT_DockerCompose] && "✓" || " "} Docker Compose${RESET}"
+        echo -e "${GREEN}4. ${selections[DT_Kubectl] && "✓" || " "} Kubernetes (kubectl)${RESET}"
+        echo -e "${GREEN}5. ${selections[DT_Minikube] && "✓" || " "} Minikube${RESET}"
+        echo -e "${GREEN}6. ${selections[DT_AWS_CLI] && "✓" || " "} AWS CLI${RESET}"
+        echo -e "${GREEN}7. ${selections[DT_BuildTools] && "✓" || " "} Build Tools (make, cmake, etc.)${RESET}"
+        echo
+        echo -e "${YELLOW}8. Toggle All${RESET}"
+        echo -e "${RED}9. Back to Main Menu${RESET}"
+        echo
+        read -p "Your choice: " choice
+
+        case $choice in
+            1) toggle_selection "DT_Git" ;;
+            2) toggle_selection "DT_Docker" ;;
+            3) toggle_selection "DT_DockerCompose" ;;
+            4) toggle_selection "DT_Kubectl" ;;
+            5) toggle_selection "DT_Minikube" ;;
+            6) toggle_selection "DT_AWS_CLI" ;;
+            7) toggle_selection "DT_BuildTools" ;;
+            8) 
+                # Toggle all
+                local all_selected=true
+                for key in "${!selections[@]}"; do
+                    if [[ $key == DT_* && ${selections[$key]} == false ]]; then
+                        all_selected=false
+                        break
+                    fi
+                done
+                
+                for key in "${!selections[@]}"; do
+                    if [[ $key == DT_* ]]; then
+                        selections[$key]=$([ "$all_selected" == true ] && echo false || echo true)
+                    fi
+                done
+                ;;
+            9) menu_active=false ;;
+            *) echo -e "${RED}Invalid choice! Please try again.${RESET}"; sleep 1 ;;
+        esac
+    done
+}
+
+# Function to show package managers and utilities menu
+show_utilities_menu() {
+    local menu_active=true
+
+    while $menu_active; do
+        display_header
+        echo -e "${CYAN}${BOLD}Package Managers & Utilities Selection${RESET}"
+        echo
+        echo -e "${BLUE}Toggle options by entering the corresponding number:${RESET}"
+        echo -e "${GREEN}1. ${selections[PU_Yay] && "✓" || " "} Yay (AUR Helper)${RESET}"
+        echo -e "${GREEN}2. ${selections[PU_Snap] && "✓" || " "} Snap${RESET}"
+        echo -e "${GREEN}3. ${selections[PU_Flatpak] && "✓" || " "} Flatpak${RESET}"
+        echo -e "${GREEN}4. ${selections[PU_ZshUtils] && "✓" || " "} Zsh Utilities${RESET}"
+        echo -e "${GREEN}5. ${selections[PU_NerdFonts] && "✓" || " "} Nerd Fonts${RESET}"
+        echo -e "${GREEN}6. ${selections[OT_ModernUtils] && "✓" || " "} Modern CLI Tools${RESET}"
+        echo
+        echo -e "${YELLOW}7. Toggle All${RESET}"
+        echo -e "${RED}8. Back to Main Menu${RESET}"
+        echo
+        read -p "Your choice: " choice
+
+        case $choice in
+            1) toggle_selection "PU_Yay" ;;
+            2) toggle_selection "PU_Snap" ;;
+            3) toggle_selection "PU_Flatpak" ;;
+            4) toggle_selection "PU_ZshUtils" ;;
+            5) toggle_selection "PU_NerdFonts" ;;
+            6) toggle_selection "OT_ModernUtils" ;;
+            7) 
+                # Toggle all
+                local all_selected=true
+                for key in "${!selections[@]}"; do
+                    if [[ ($key == PU_* || $key == "OT_ModernUtils") && ${selections[$key]} == false ]]; then
+                        all_selected=false
+                        break
+                    fi
+                done
+                
+                for key in "${!selections[@]}"; do
+                    if [[ $key == PU_* || $key == "OT_ModernUtils" ]]; then
+                        selections[$key]=$([ "$all_selected" == true ] && echo false || echo true)
+                    fi
+                done
+                ;;
+            8) menu_active=false ;;
+            *) echo -e "${RED}Invalid choice! Please try again.${RESET}"; sleep 1 ;;
+        esac
+    done
+}
+
+# Function to show databases menu
+show_databases_menu() {
+    local menu_active=true
+
+    while $menu_active; do
+        display_header
+        echo -e "${CYAN}${BOLD}Databases Selection${RESET}"
+        echo
+        echo -e "${BLUE}Toggle options by entering the corresponding number:${RESET}"
+        echo -e "${GREEN}1. ${selections[DB_MariaDB] && "✓" || " "} MariaDB${RESET}"
+        echo -e "${GREEN}2. ${selections[DB_PostgreSQL] && "✓" || " "} PostgreSQL${RESET}"
+        echo -e "${GREEN}3. ${selections[DB_Redis] && "✓" || " "} Redis${RESET}"
+        echo -e "${GREEN}4. ${selections[DB_MongoDB] && "✓" || " "} MongoDB${RESET}"
+        echo
+        echo -e "${YELLOW}5. Toggle All${RESET}"
+        echo -e "${RED}6. Back to Main Menu${RESET}"
+        echo
+        read -p "Your choice: " choice
+
+        case $choice in
+            1) toggle_selection "DB_MariaDB" ;;
+            2) toggle_selection "DB_PostgreSQL" ;;
+            3) toggle_selection "DB_Redis" ;;
+            4) toggle_selection "DB_MongoDB" ;;
+            5) 
+                # Toggle all
+                local all_selected=true
+                for key in "${!selections[@]}"; do
+                    if [[ $key == DB_* && ${selections[$key]} == false ]]; then
+                        all_selected=false
+                        break
+                    fi
+                done
+                
+                for key in "${!selections[@]}"; do
+                    if [[ $key == DB_* ]]; then
+                        selections[$key]=$([ "$all_selected" == true ] && echo false || echo true)
+                    fi
+                done
+                ;;
+            6) menu_active=false ;;
+            *) echo -e "${RED}Invalid choice! Please try again.${RESET}"; sleep 1 ;;
+        esac
+    done
+}
+
+# Function to show IDEs and editors menu
+show_editors_menu() {
+    local menu_active=true
+
+    while $menu_active; do
+        display_header
+        echo -e "${CYAN}${BOLD}IDEs & Code Editors Selection${RESET}"
+        echo
+        echo -e "${BLUE}Toggle options by entering the corresponding number:${RESET}"
+        echo -e "${GREEN}1. ${selections[IDE_VSCode] && "✓" || " "} Visual Studio Code${RESET}"
+        echo -e "${GREEN}2. ${selections[IDE_JetBrains] && "✓" || " "} JetBrains Toolbox${RESET}"
+        echo
+        echo -e "${YELLOW}3. Toggle All${RESET}"
+        echo -e "${RED}4. Back to Main Menu${RESET}"
+        echo
+        read -p "Your choice: " choice
+
+        case $choice in
+            1) toggle_selection "IDE_VSCode" ;;
+            2) toggle_selection "IDE_JetBrains" ;;
+            3) 
+                # Toggle all
+                local all_selected=true
+                for key in "${!selections[@]}"; do
+                    if [[ $key == IDE_* && ${selections[$key]} == false ]]; then
+                        all_selected=false
+                        break
+                    fi
+                done
+                
+                for key in "${!selections[@]}"; do
+                    if [[ $key == IDE_* ]]; then
+                        selections[$key]=$([ "$all_selected" == true ] && echo false || echo true)
+                    fi
+                done
+                ;;
+            4) menu_active=false ;;
+            *) echo -e "${RED}Invalid choice! Please try again.${RESET}"; sleep 1 ;;
+        esac
+    done
+}
+
+# Function to show other tools menu
+show_other_tools_menu() {
+    local menu_active=true
+
+    while $menu_active; do
+        display_header
+        echo -e "${CYAN}${BOLD}Other Tools Selection${RESET}"
+        echo
+        echo -e "${BLUE}Toggle options by entering the corresponding number:${RESET}"
+        echo -e "${GREEN}1. ${selections[OT_Postman] && "✓" || " "} Postman${RESET}"
+        echo -e "${GREEN}2. ${selections[OT_Insomnia] && "✓" || " "} Insomnia${RESET}"
+        echo -e "${GREEN}3. ${selections[OT_Htop] && "✓" || " "} Htop${RESET}"
+        echo -e "${GREEN}4. ${selections[OT_Btop] && "✓" || " "} Btop++${RESET}"
+        echo
+        echo -e "${YELLOW}5. Toggle All${RESET}"
+        echo -e "${RED}6. Back to Main Menu${RESET}"
+        echo
+        read -p "Your choice: " choice
+
+        case $choice in
+            1) toggle_selection "OT_Postman" ;;
+            2) toggle_selection "OT_Insomnia" ;;
+            3) toggle_selection "OT_Htop" ;;
+            4) toggle_selection "OT_Btop" ;;
+            5) 
+                # Toggle all
+                local all_selected=true
+                for key in "${!selections[@]}"; do
+                    if [[ $key == OT_* && $key != "OT_ModernUtils" && ${selections[$key]} == false ]]; then
+                        all_selected=false
+                        break
+                    fi
+                done
+                
+                for key in "${!selections[@]}"; do
+                    if [[ $key == OT_* && $key != "OT_ModernUtils" ]]; then
+                        selections[$key]=$([ "$all_selected" == true ] && echo false || echo true)
+                    fi
+                done
+                ;;
+            6) menu_active=false ;;
+            *) echo -e "${RED}Invalid choice! Please try again.${RESET}"; sleep 1 ;;
+        esac
+    done
+}
+
+# Function to show quick configurations menu
+show_quick_config_menu() {
+    local menu_active=true
+
+    while $menu_active; do
+        display_header
+        echo -e "${CYAN}${BOLD}Quick Configurations${RESET}"
+        echo
+        echo -e "${BLUE}Select a predefined configuration:${RESET}"
+        echo -e "${GREEN}1. Web Development Stack (Node.js, Python, Docker, VS Code, MariaDB, Postman)${RESET}"
+        echo -e "${GREEN}2. DevOps Stack (Docker, Kubernetes, AWS CLI, Git, Go, Terraform)${RESET}"
+        echo -e "${GREEN}3. Data Science Stack (Python, R, PostgreSQL, MongoDB, Jupyter)${RESET}"
+        echo -e "${GREEN}4. Full Stack Development (All languages, Databases, Docker, K8s, IDEs)${RESET}"
+        echo -e "${GREEN}5. Minimalist Setup (Git, VS Code, Modern CLI Tools)${RESET}"
+        echo
+        echo -e "${RED}6. Back to Main Menu${RESET}"
+        echo
+        read -p "Your choice: " choice
+
+        case $choice in
+            1)
+                # Web Development Stack
+                selections[PL_NodeJS]=true
+                selections[PL_Python]=true
+                selections[DT_Docker]=true
+                selections[DT_DockerCompose]=true
+                selections[DB_MariaDB]=true
+                selections[IDE_VSCode]=true
+                selections[OT_Postman]=true
+                selections[DT_Git]=true
+                selections[PU_ZshUtils]=true
+                selections[OT_ModernUtils]=true
+                echo -e "${GREEN}Web Development Stack selected!${RESET}"
+                sleep 1
+                ;;
+            2)
+                # DevOps Stack
+                selections[DT_Docker]=true
+                selections[DT_DockerCompose]=true
+                selections[DT_Kubectl]=true
+                selections[DT_Minikube]=true
+                selections[DT_AWS_CLI]=true
+                selections[DT_Git]=true
+                selections[PL_Go]=true
+                selections[IDE_VSCode]=true
+                selections[PU_ZshUtils]=true
+                selections[OT_ModernUtils]=true
+                selections[OT_Htop]=true
+                selections[OT_Btop]=true
+                echo -e "${GREEN}DevOps Stack selected!${RESET}"
+                sleep 1
+                ;;
+            3)
+                # Data Science Stack
+                selections[PL_Python]=true
+                selections[DB_PostgreSQL]=true
+                selections[DB_MongoDB]=true
+                selections[IDE_VSCode]=true
+                selections[IDE_JetBrains]=true
+                selections[PU_ZshUtils]=true
+                echo -e "${GREEN}Data Science Stack selected!${RESET}"
+                sleep 1
+                ;;
+            4)
+                # Full Stack Development
+                for key in "${!selections[@]}"; do
+                    selections[$key]=true
+                done
+                echo -e "${GREEN}Full Stack Development (All tools) selected!${RESET}"
+                sleep 1
+                ;;
+            5)
+                # Minimalist Setup
+                selections[DT_Git]=true
+                selections[IDE_VSCode]=true
+                selections[OT_ModernUtils]=true
+                selections[PU_ZshUtils]=true
+                echo -e "${GREEN}Minimalist Setup selected!${RESET}"
+                sleep 1
+                ;;
+            6) 
+                menu_active=false 
+                ;;
+            *) 
+                echo -e "${RED}Invalid choice! Please try again.${RESET}"
+                sleep 1
+                ;;
+        esac
+    done
+}
+
+# Function to install selected packages
+install_selections() {
+    display_header
+    echo -e "${CYAN}${BOLD}Installing Selected Packages${RESET}"
+    echo
+    
+    # First, install Yay if it's selected or if any AUR package is selected
+    if [[ ${selections[PU_Yay]} == true ]]; then
+        check_and_install "yay" "yay" "pacman"
+    fi
+    
+    # Install Git (required for many other tools)
+    if [[ ${selections[DT_Git]} == true ]]; then
+        check_and_install "git" "git" "pacman"
+    fi
+    
+    # Install Programming Languages
+    echo -e "${MAGENTA}${BOLD}Installing Programming Languages...${RESET}"
+    
+    if [[ ${selections[PL_Python]} == true ]]; then
+        check_and_install "python" "python" "pacman"
+        check_and_install "pip" "python-pip" "pacman"
+        
+        # Install additional Python tools
+        echo -e "${YELLOW}Installing Python development tools...${RESET}"
+        pip install --user virtualenv pipenv poetry
+    fi
+    
+    if [[ ${selections[PL_GCC]} == true ]]; then
+        check_and_install "gcc" "gcc" "pacman"
+        check_and_install "g++" "gcc" "pacman"  # g++ is part of gcc package
+    fi
+    
+    if [[ ${selections[PL_Clang]} == true ]]; then
+        check_and_install "clang" "clang" "pacman"
+    fi
+    
+    if [[ ${selections[PL_NodeJS]} == true ]]; then
+        check_and_install "node" "nodejs" "pacman"
+        check_and_install "npm" "npm" "pacman"
+        
+        # Install useful npm packages globally
+        echo -e "${YELLOW}Installing global npm packages...${RESET}"
+        npm install -g yarn typescript nodemon ts-node
+    fi
+    
+    if [[ ${selections[PL_Java]} == true ]]; then
+        check_and_install "java" "jdk-openjdk" "pacman"
+    fi
+    
+    if [[ ${selections[PL_Flutter]} == true ]]; then
+        check_and_install "flutter" "flutter" "aur"
+        check_and_install "dart" "dart" "pacman"
+    fi
+    
+    if [[ ${selections[PL_DotNet]} == true ]]; then
+        check_and_install "dotnet" "dotnet-sdk" "pacman"
+    fi
+    
+    if [[ ${selections[PL_Go]} == true ]]; then
+        check_and_install "go" "go" "pacman"
+    fi
+    
+    if [[ ${selections[PL_Rust]} == true ]]; then
+        install_rust
+    fi
+    
+    if [[ ${selections[PL_PHP]} == true ]]; then
+        check_and_install "php" "php" "pacman"
+        # Install composer for PHP package management
+        check_and_install "composer" "composer" "pacman"
+    fi
+
+if [[ ${selections[PL_Perl]} == true ]]; then
+        check_and_install "perl" "perl" "pacman"
+    fi
+    
+    # Install Development Tools
+    echo -e "${MAGENTA}${BOLD}Installing Development Tools...${RESET}"
+    
+    if [[ ${selections[DT_Docker]} == true ]]; then
+        check_and_install "docker" "docker" "pacman"
+        enable_service "docker"
+        add_user_to_group "docker"
+    fi
+    
+    if [[ ${selections[DT_DockerCompose]} == true ]]; then
+        check_and_install "docker-compose" "docker-compose" "pacman"
+    fi
+    
+    if [[ ${selections[DT_Kubectl]} == true ]]; then
+        check_and_install "kubectl" "kubectl" "pacman"
+    fi
+    
+    if [[ ${selections[DT_Minikube]} == true ]]; then
+        check_and_install "minikube" "minikube" "pacman"
+    fi
+    
+    if [[ ${selections[DT_AWS_CLI]} == true ]]; then
+        check_and_install "aws" "aws-cli" "pacman"
+    fi
+    
+    if [[ ${selections[DT_BuildTools]} == true ]]; then
+        check_and_install "make" "make" "pacman"
+        check_and_install "cmake" "cmake" "pacman"
+        check_and_install "autoconf" "autoconf" "pacman"
+    fi
+    
+    # Install Package Managers & Utilities
+    echo -e "${MAGENTA}${BOLD}Installing Package Managers & Utilities...${RESET}"
+    
+    if [[ ${selections[PU_Snap]} == true ]]; then
+        check_and_install "snap" "snapd" "pacman"
+        enable_service "snapd"
+    fi
+    
+    if [[ ${selections[PU_Flatpak]} == true ]]; then
+        check_and_install "flatpak" "flatpak" "pacman"
+    fi
+    
+    if [[ ${selections[PU_ZshUtils]} == true ]]; then
+        check_and_install "zsh" "zsh" "pacman"
+        
+        # Install Oh My Zsh
+        echo -e "${YELLOW}Installing Oh My Zsh...${RESET}"
+        if [ ! -d "$HOME/.oh-my-zsh" ]; then
+            sh -c "$(curl -fsSL https://raw.githubusercontent.com/ohmyzsh/ohmyzsh/master/tools/install.sh)" "" --unattended
+            echo -e "${GREEN}✓ Successfully installed Oh My Zsh${RESET}"
+        else
+            echo -e "${GREEN}✓ Oh My Zsh is already installed.${RESET}"
+        fi
+        
+        # Install zsh plugins
+        echo -e "${YELLOW}Installing Zsh plugins...${RESET}"
+        if [ ! -d "$HOME/.oh-my-zsh/custom/plugins/zsh-autosuggestions" ]; then
+            git clone https://github.com/zsh-users/zsh-autosuggestions ${ZSH_CUSTOM:-~/.oh-my-zsh/custom}/plugins/zsh-autosuggestions
+        fi
+        
+        if [ ! -d "$HOME/.oh-my-zsh/custom/plugins/zsh-syntax-highlighting" ]; then
+            git clone https://github.com/zsh-users/zsh-syntax-highlighting.git ${ZSH_CUSTOM:-~/.oh-my-zsh/custom}/plugins/zsh-syntax-highlighting
+        fi
+        
+        # Update .zshrc
+        if [ -f "$HOME/.zshrc" ]; then
+            if ! grep -q "plugins=(git zsh-autosuggestions zsh-syntax-highlighting)" "$HOME/.zshrc"; then
+                sed -i 's/plugins=(git)/plugins=(git zsh-autosuggestions zsh-syntax-highlighting)/' "$HOME/.zshrc"
+                echo -e "${GREEN}✓ Updated .zshrc with plugins${RESET}"
+            fi
+        fi
+    fi
+    
+    if [[ ${selections[PU_NerdFonts]} == true ]]; then
+        echo -e "${YELLOW}Installing Nerd Fonts...${RESET}"
+        install_with_yay "ttf-meslo-nerd-font-powerlevel10k"
+        echo -e "${GREEN}✓ Successfully installed Nerd Fonts${RESET}"
+    fi
+    
+    # Install Databases
+    echo -e "${MAGENTA}${BOLD}Installing Databases...${RESET}"
+    
+    if [[ ${selections[DB_MariaDB]} == true ]]; then
+        check_and_install "mariadb" "mariadb" "pacman"
+        enable_service "mariadb"
+        
+        echo -e "${YELLOW}Setting up MariaDB...${RESET}"
+        sudo mysql_install_db --user=mysql --basedir=/usr --datadir=/var/lib/mysql
+        echo -e "${GREEN}✓ MariaDB initialized. Run 'sudo mysql_secure_installation' to secure your installation.${RESET}"
+    fi
+    
+    if [[ ${selections[DB_PostgreSQL]} == true ]]; then
+        check_and_install "postgres" "postgresql" "pacman"
+        
+        echo -e "${YELLOW}Setting up PostgreSQL...${RESET}"
+        sudo -u postgres initdb -D /var/lib/postgres/data
+        enable_service "postgresql"
+        echo -e "${GREEN}✓ PostgreSQL initialized.${RESET}"
+    fi
+    
+    if [[ ${selections[DB_Redis]} == true ]]; then
+        check_and_install "redis-server" "redis" "pacman"
+        enable_service "redis"
+    fi
+    
+    if [[ ${selections[DB_MongoDB]} == true ]]; then
+        check_and_install "mongod" "mongodb" "pacman"
+        enable_service "mongodb"
+    fi
+    
+    # Install IDEs & Code Editors
+    echo -e "${MAGENTA}${BOLD}Installing IDEs & Code Editors...${RESET}"
+    
+    if [[ ${selections[IDE_VSCode]} == true ]]; then
+        check_and_install "code" "visual-studio-code-bin" "aur"
+    fi
+    
+    if [[ ${selections[IDE_JetBrains]} == true ]]; then
+        check_and_install "jetbrains-toolbox" "jetbrains-toolbox" "aur"
+    fi
+    
+    # Install Other Tools
+    echo -e "${MAGENTA}${BOLD}Installing Other Tools...${RESET}"
+    
+    if [[ ${selections[OT_Postman]} == true ]]; then
+        check_and_install "postman" "postman-bin" "aur"
+    fi
+    
+    if [[ ${selections[OT_Insomnia]} == true ]]; then
+        check_and_install "insomnia" "insomnia" "aur"
+    fi
+    
+    if [[ ${selections[OT_Htop]} == true ]]; then
+        check_and_install "htop" "htop" "pacman"
+    fi
+    
+    if [[ ${selections[OT_Btop]} == true ]]; then
+        check_and_install "btop" "btop" "pacman"
+    fi
+    
+    if [[ ${selections[OT_ModernUtils]} == true ]]; then
+        echo -e "${YELLOW}Installing Modern CLI Tools...${RESET}"
+        check_and_install "bat" "bat" "pacman"
+        check_and_install "exa" "exa" "pacman"
+        check_and_install "fd" "fd" "pacman"
+        check_and_install "ripgrep" "ripgrep" "pacman"
+        check_and_install "fzf" "fzf" "pacman"
+        check_and_install "ncdu" "ncdu" "pacman"
+        check_and_install "tldr" "tldr" "pacman"
+    fi
+    
+    echo
+    echo -e "${GREEN}${BOLD}Installation completed!${RESET}"
+    echo -e "${YELLOW}Note: Some changes may require a system restart to take effect.${RESET}"
+    echo
+    read -p "Press Enter to continue..." temp
+}
+
+# Function for the main menu
+main_menu() {
+    local menu_active=true
+
+    while $menu_active; do
+        display_header
+        show_selections
+        echo -e "${CYAN}${BOLD}Main Menu${RESET}"
+        echo
+        echo -e "${BLUE}Select a category to configure:${RESET}"
+        echo -e "${GREEN}1. Programming Languages${RESET}"
+        echo -e "${GREEN}2. Development Tools${RESET}"
+        echo -e "${GREEN}3. Package Managers & Utilities${RESET}"
+        echo -e "${GREEN}4. Databases${RESET}"
+        echo -e "${GREEN}5. IDEs & Code Editors${RESET}"
+        echo -e "${GREEN}6. Other Tools${RESET}"
+        echo -e "${GREEN}7. Quick Configurations${RESET}"
+        echo
+        echo -e "${YELLOW}8. Install Selected Packages${RESET}"
+        echo -e "${RED}9. Exit${RESET}"
+        echo
+        read -p "Your choice: " choice
+
+        case $choice in
+            1) show_languages_menu ;;
+            2) show_devtools_menu ;;
+            3) show_utilities_menu ;;
+            4) show_databases_menu ;;
+            5) show_editors_menu ;;
+            6) show_other_tools_menu ;;
+            7) show_quick_config_menu ;;
+            8) install_selections ;;
+            9) 
+                echo -e "${GREEN}Thank you for using Arch Dev Setup!${RESET}"
+                menu_active=false 
+                ;;
+            *) 
+                echo -e "${RED}Invalid choice! Please try again.${RESET}"
+                sleep 1
+                ;;
+        esac
+    done
+}
+
+# Check if running as root (not recommended)
+if [ "$EUID" -eq 0 ]; then
+    echo -e "${RED}Warning: This script is not recommended to be run as root directly.${RESET}"
+    echo -e "${YELLOW}Commands requiring elevated privileges will use sudo instead.${RESET}"
+    read -p "Press Enter to continue anyway or Ctrl+C to abort..." temp
+fi
+
+# Check if running on Arch Linux or derivative
+if ! command -v pacman &> /dev/null; then
+    echo -e "${RED}Error: This script is designed for Arch Linux or Arch-based distributions only.${RESET}"
+    exit 1
+fi
+
+# Update system first
+echo -e "${YELLOW}Updating system packages...${RESET}"
+sudo pacman -Syu --noconfirm
+
+# Start main menu
+main_menu
+
+exit 0
